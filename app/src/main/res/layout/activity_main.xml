@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical"
+    tools:context=".activities.MainActivity">
+
+    <ImageView
+        android:id="@+id/logo"
+        android:layout_width="match_parent"
+        android:layout_height="250dp"
+        android:layout_alignParentTop="true"
+        android:layout_marginTop="200dp"
+        android:contentDescription="@string/todo"
+        android:src="@drawable/toyibat_logo" />
+
+    <TextView
+        android:id="@+id/linkskool_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/logo"
+        android:layout_margin="10dp"
+        android:fontFamily="@font/kalam"
+        android:text="@string/app_name"
+        android:textAlignment="center"
+        android:textColor="@color/test_color_2"
+        android:textSize="40sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentEnd="true"
+        android:layout_alignParentBottom="true"
+        android:layout_marginBottom="@dimen/dimen_16"
+        android:fontFamily="@font/lato"
+        android:gravity="center_horizontal"
+        android:text="Powered by Toyibat Group of Schools"
+        android:textColor="@color/test_color_7"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+</RelativeLayout>
