@@ -1,5 +1,6 @@
 package com.digitaldream.toyibatskool.dialog
 
+import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
 import android.view.View
@@ -13,12 +14,16 @@ import androidx.fragment.app.DialogFragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.android.volley.Request
+import com.android.volley.VolleyError
 import com.digitaldream.toyibatskool.R
 import com.digitaldream.toyibatskool.adapters.AdminELearningQuizAdapter
 import com.digitaldream.toyibatskool.adapters.GenericAdapter2
 import com.digitaldream.toyibatskool.models.QuestionItem
 import com.digitaldream.toyibatskool.models.QuizProgressModel
 import com.digitaldream.toyibatskool.models.SectionModel
+import com.digitaldream.toyibatskool.utils.FunctionUtils.sendRequestToServer
+import com.digitaldream.toyibatskool.utils.VolleyCallback
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
@@ -27,9 +32,93 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import timber.log.Timber
 import java.util.Locale
 
+/**
+ * Introduction:
+ *
+ * `StudentELearningQuizDialogFragment` is a component designed to facilitate quiz-taking functionality
+ * in an e-learning application. It provides an interactive quiz interface, tracks user responses, and
+ * offers a countdown timer for time-limited quizzes.
+ *
+ * Getting Started:
+ *
+ * To integrate `StudentELearningQuizDialogFragment` into your application, follow these steps:
+ *
+ * 1. Include the Library:
+ *    Ensure that the necessary library containing `StudentELearningQuizDialogFragment` is added to your project.
+ *
+ * 2. Initialize the Component:
+ *    Create an instance of `StudentELearningQuizDialogFragment` by providing the required parameters,
+ *    such as quiz duration and a list of quiz items.
+ *
+ *    ```kotlin
+ *    val quizDialogFragment = StudentELearningQuizDialogFragment(quizId, duration, quizItems)
+ *    ```
+ *
+ * 3. Show the Dialog:
+ *    Display the quiz dialog using the `show` method.
+ *
+ *    ```kotlin
+ *    quizDialogFragment.show(supportFragmentManager, "QuizDialogFragment")
+ *    ```
+ *
+ * Features:
+ *
+ * - Quiz Interface:
+ *   The component provides an interactive interface for users to answer quiz questions using a ViewPager2.
+ *
+ * - Progress Tracking:
+ *   A progress bar allows users to track their progress through the quiz. It dynamically updates as the user navigates through questions.
+ *
+ * - Countdown Timer:
+ *   If a quiz has a time limit, a countdown timer is displayed, alerting users to the remaining time.
+ *
+ * - User Responses:
+ *   User responses are tracked and stored for later evaluation.
+ *
+ * Usage:
+ *
+ * ### Quiz Initialization
+ *
+ * ```kotlin
+ * val quizDialogFragment = StudentELearningQuizDialogFragment(quizId, duration, quizItems)
+ * ```
+ *
+ * ### Display Quiz Dialog
+ *
+ * ```kotlin
+ * quizDialogFragment.show(supportFragmentManager, "QuizDialogFragment")
+ * ```
+ *
+ * API Reference:
+ *
+ * ### `StudentELearningQuizDialogFragment`
+ *
+ * #### Constructors
+ *
+ * - `StudentELearningQuizDialogFragment(quizId:String, duration: String, quizItems:
+ * MutableList<SectionModel>)`
+ *   Creates a new instance of the quiz dialog.
+ *
+ * #### Public Methods
+ *
+ * - `onOptionSelected(questionId: String, selectedOption: String)`
+ *   Callback when a user selects an option for a multiple-choice question.
+ *
+ * - `setTypedAnswer(questionId: String, typedAnswer: String)`
+ *   Callback when a user enters a typed answer for a question.
+ *
+ */
+
+
+private const val MAX_VISIBLE_QUESTIONS = 5
+
 class StudentELearningQuizDialogFragment(
+    private val quizId: String,
     private val duration: String,
     private val quizItems: MutableList<SectionModel>
 ) : DialogFragment(R.layout.fragment_student_e_learning_quiz),
@@ -46,9 +135,16 @@ class StudentELearningQuizDialogFragment(
     private lateinit var countDownJob: Job
     private lateinit var quizAdapter: AdminELearningQuizAdapter
     private lateinit var progressAdapter: GenericAdapter2<QuizProgressModel>
-    private var userResponses = mutableMapOf<String, String>()
 
+    private var userResponses = mutableMapOf<String, String>()
     private var progressList = mutableListOf<QuizProgressModel>()
+
+    private var userName: String? = null
+    private var userId: String? = null
+    private var levelId: String? = null
+    private var courseId: String? = null
+    private var classId: String? = null
+    private var courseName: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,7 +172,7 @@ class StudentELearningQuizDialogFragment(
 
         showQuestion()
 
-        submitQuiz()
+        showQuizCompletionDialog()
     }
 
     private fun setUpViews(view: View) {
@@ -87,6 +183,20 @@ class StudentELearningQuizDialogFragment(
             progressRecyclerView = findViewById(R.id.progressRecyclerView)
             previousBtn = findViewById(R.id.prevBtn)
             nextBtn = findViewById(R.id.nextBtn)
+        }
+
+        val sharedPreferences = requireActivity().getSharedPreferences(
+            "loginDetail",
+            Context.MODE_PRIVATE
+        )
+
+        with(sharedPreferences) {
+            userId = getString("user_id", "")
+            userName = getString("user", "")
+            levelId = getString("level", "")
+            courseId = getString("courseId", "")
+            courseName = getString("course_name", "")
+            classId = getString("classId", "")
         }
     }
 
@@ -99,6 +209,8 @@ class StudentELearningQuizDialogFragment(
                 super.onPageSelected(position)
 
                 updateNavigationButtons()
+
+                updateProgressRecyclerView()
             }
         })
 
@@ -172,6 +284,8 @@ class StudentELearningQuizDialogFragment(
         )
 
         setUpProgressRecyclerView()
+
+        updateProgressRecyclerView()
     }
 
     private fun setUpProgressRecyclerView() {
@@ -184,6 +298,32 @@ class StudentELearningQuizDialogFragment(
             )
             adapter = progressAdapter
         }
+    }
+
+    private fun updateProgressRecyclerView() {
+        val currentPosition = quizViewPager.currentItem
+        val totalQuestions = totalQuestionCount()
+
+        val start = currentPosition - MAX_VISIBLE_QUESTIONS / 2
+        val end = currentPosition + MAX_VISIBLE_QUESTIONS / 2
+
+        val displayRange = if (totalQuestions <= MAX_VISIBLE_QUESTIONS) {
+            0 until totalQuestions
+        } else {
+            start.coerceIn(0, totalQuestions - MAX_VISIBLE_QUESTIONS) until end.coerceIn(
+                MAX_VISIBLE_QUESTIONS, totalQuestions
+            )
+        }
+
+        progressList.forEachIndexed { index, model ->
+            if (index in displayRange) {
+                model.questionPosition = (index + 1).toString()
+            } else {
+                model.questionPosition = "..."
+            }
+        }
+
+        progressAdapter.notifyDataSetChanged()
     }
 
     private fun scrollToPosition(progressAdapterPosition: Int) {
@@ -204,6 +344,7 @@ class StudentELearningQuizDialogFragment(
                 questionPosition++
             }
         }
+
 
         return currentPosition
     }
@@ -239,7 +380,7 @@ class StudentELearningQuizDialogFragment(
                 remainingTimeMillis -= countDownIntervalMillis
             }
 
-            //submitTest()
+            showQuizCompletionDialog()
 
             withContext(Dispatchers.Main) {
                 "00:00".let { countDownTxt.text = it }
@@ -269,18 +410,87 @@ class StudentELearningQuizDialogFragment(
         }
     }
 
+    private fun prepareUserResponse() = JSONArray().apply {
+        quizItems.forEach { section ->
+            val questionItem = section.questionItem
 
-    private fun submitQuiz() {
+            JSONObject().apply {
+                if (questionItem is QuestionItem.MultiChoice) {
+                    val question = questionItem.question
+                    val userAnswer = userResponses[question.questionId]
+
+                    if (userAnswer != null) {
+                        put("id", question.questionId)
+                        put("question", question.questionText)
+                        put("correct", question.correctAnswer)
+                        put("answer", userAnswer)
+                        put("type", "multiple_choice")
+                    }
+
+
+                } else if (questionItem is QuestionItem.ShortAnswer) {
+                    val question = questionItem.question
+                    val userAnswer = userResponses[question.questionId]
+
+                    put("id", question.questionId)
+                    put("question", question.questionText)
+                    put("correct", question.answerText)
+                    put("answer", userAnswer)
+                    put("type", "short_answer")
+                }
+            }.let {
+                put(it)
+            }
+        }
+    }
+
+
+    private fun prepareQuizJson() = HashMap<String, String>().apply {
+        val userResponse = prepareUserResponse()
+        val userScore = calculateScore()
+
+        put("exam_id", quizId)
+        put("data", userResponse.toString())
+        put("score", userScore.toString())
+        put("course", courseId ?: "")
+        put("course_name", courseName ?: "")
+        put("user_id", userId ?: "")
+        put("user_name", userName ?: "")
+        put("level", levelId ?: "")
+        put("classId", classId ?: "")
+        put("type", "0")
+    }
+
+    private fun postQuizResponse() {
+        val quizData = prepareQuizJson()
+        val url = "${requireActivity().getString(R.string.base_url)}/addResponse.php"
+
+        Timber.tag("response").d("$quizData")
+
+        sendRequestToServer(Request.Method.POST, url, requireContext(), quizData,
+            object : VolleyCallback {
+                override fun onResponse(response: String) {
+                    StudentELearningQuizCompletionDialog(requireContext()) {
+                        requireActivity().onBackPressedDispatcher.onBackPressed()
+                    }.apply {
+                        show()
+                    }.window?.setLayout(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                }
+
+                override fun onError(error: VolleyError) {
+
+                }
+            })
+
+    }
+
+
+    private fun showQuizCompletionDialog() {
         submitBtn.setOnClickListener {
-            StudentELearningQuizCompletionDialog(requireContext()) {
-                requireActivity().onBackPressedDispatcher.onBackPressed()
-            }.apply {
-                show()
-            }.window?.setLayout(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-
+            postQuizResponse()
         }
     }
 
@@ -337,7 +547,7 @@ class StudentELearningQuizDialogFragment(
         progressAdapter.notifyDataSetChanged()
     }
 
-    private fun updateAnsweredQuestion(){
+    private fun updateAnsweredQuestion() {
         val currentQuestionPosition = questionPosition(quizViewPager.currentItem)
         progressList[currentQuestionPosition].isAnswered = true
     }
